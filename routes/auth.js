@@ -8,50 +8,71 @@ const bcrypt = require("bcrypt");
 const bcryptSalt = 10;
 
 
-authRoutes.get("/login", (req, res, next) => {
-  res.render("auth/login", { "message": req.flash("error") });
+authRoutes.post("/login", (req, res, next) => {
+  passport.authenticate("local", (err, theUser) => {
+    if (err){
+      next(err);
+      return;
+    }
+
+    if(!theUser){
+      const err = new Error("Log in failed!");
+      err.status = 400;
+      next(err);
+      return;
+    }
+
+    req.login(theUser, () => {
+      // clear the password before sending (it's a security risk)
+      theUser.password = undefined;
+      res.json({ userInfo: theUser });
+    })
+  })( req, res, next);
 });
 
-authRoutes.post("/login", passport.authenticate("local", {
-  successRedirect: "/",
-  failureRedirect: "/auth/login",
-  failureFlash: true,
-  passReqToCallback: true
-}));
-
-authRoutes.get("/signup", (req, res, next) => {
-  res.render("auth/signup");
-});
 
 authRoutes.post("/signup", (req, res, next) => {
   const username = req.body.username;
   const password = req.body.password;
-  const rol = req.body.role;
-  if (username === "" || password === "") {
-    res.render("auth/signup", { message: "Indicate username and password" });
+  const email = req.body.email;
+  if (username === "" || password === "" || email==="") {
+    const err = new Error("Username or password invalid");
+    err.status = 400;
+    next(err);
     return;
   }
-
-  User.findOne({ username }, "username", (err, user) => {
+  
+  User.findOne({ email }, "email", (err, user) => {
     if (user !== null) {
-      res.render("auth/signup", { message: "The username already exists" });
+      const err = new Error("The email already exists");
+      err.status = 400;
+      next(err);
       return;
     }
-
+    
     const salt = bcrypt.genSaltSync(bcryptSalt);
     const hashPass = bcrypt.hashSync(password, salt);
-
+    
     const newUser = new User({
       username,
       password: hashPass,
-      role:"teacher"
+      email,
+      confirmationCode: username
     });
 
     newUser.save((err) => {
       if (err) {
-        res.render("auth/signup", { message: "Something went wrong" });
+        next(err);
       } else {
-        res.redirect("/");
+        // if you want to login the user directly after signing up
+        req.login(newUser, () => {
+          // clear the password before sending, it's a security risk
+          newUser.password = undefined;
+          res.json({ userInfo: newUser })
+        });
+        // need to do differentely if you want email confirmation for instance
+        // newUser.password = undefined;
+        // res.json({ userInfo: newUser })
       }
     });
   });
@@ -59,7 +80,14 @@ authRoutes.post("/signup", (req, res, next) => {
 
 authRoutes.get("/logout", (req, res) => {
   req.logout();
-  res.redirect("/");
+  res.json({ userInfo: null });
 });
+
+authRoutes.get("/checklogin", (req, res, next) => {
+  if (req.user){
+    req.user.password = undefined;
+  }
+  res.json({ userInfo: req.user });
+})
 
 module.exports = authRoutes;
